@@ -23,13 +23,24 @@ class ServerApplication {
 		});
 
 		const wsServer = new WebSocketServer({ server: httpServer });
-		wsServer.on("connection", (ws: WebSocket) => this.clients.push(new Client(this, ws)));
+		wsServer.on("connection", (ws: WebSocket) => {
+			this.broadcast({ type: "message", message: "A new user has joined", username: "Server" });
+			const client = new Client(this, ws);
+			this.broadcast({ type: "new_conn", userId: client.id });
+			this.clients.push(client);
+		});
 	}
 
 	private tick() {
 		this.clients = this.clients.filter(client => client.isAlive);
 		this.clients.forEach(c => c.tick());
+
+		this.broadcast({ type: "client_list", clients: this.clients.map(c => c.id) });
 		setTimeout(() => this.tick(), 1000);
+	}
+
+	public getUserById(id: string) {
+		return this.clients.find(c => c.id == id);
 	}
 
 	public broadcast(message: object) {

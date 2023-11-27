@@ -29,13 +29,22 @@ class ServerApplication {
                 console.log(`Server started on port ${process.env.PORT}`);
             });
             const wsServer = new WebSocketServer({ server: httpServer });
-            wsServer.on("connection", (ws) => this.clients.push(new Client(this, ws)));
+            wsServer.on("connection", (ws) => {
+                this.broadcast({ type: "message", message: "A new user has joined", username: "Server" });
+                const client = new Client(this, ws);
+                this.broadcast({ type: "new_conn", userId: client.id });
+                this.clients.push(client);
+            });
         });
     }
     tick() {
         this.clients = this.clients.filter(client => client.isAlive);
         this.clients.forEach(c => c.tick());
+        this.broadcast({ type: "client_list", clients: this.clients.map(c => c.id) });
         setTimeout(() => this.tick(), 1000);
+    }
+    getUserById(id) {
+        return this.clients.find(c => c.id == id);
     }
     broadcast(message) {
         for (const client of this.clients) {

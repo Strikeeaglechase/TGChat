@@ -9,6 +9,8 @@ class Client {
 
 	constructor(private server: ServerApplication, private socket: WebSocket) {
 		socket.on("message", data => this.onMessage(data));
+
+		this.send({ type: "conn", userId: this.id });
 	}
 
 	private onMessage(data: WebSocket.RawData) {
@@ -30,8 +32,33 @@ class Client {
 			case "pong":
 				break;
 
+			case "offer": {
+				const user = this.server.getUserById(message.targetUser);
+				if (user) user.send(message);
+				else console.error(`Unable to find user ${message.userId} for offer`);
+				break;
+			}
+
+			case "answer": {
+				const user = this.server.getUserById(message.targetUser);
+				if (user) user.send(message);
+				else console.error(`Unable to find user ${message.userId} for answer`);
+				break;
+			}
+
+			case "candidate": {
+				const user = this.server.getUserById(message.targetUser);
+				if (user) user.send(message);
+				else console.error(`Unable to find user ${message.userId} for ice`);
+				break;
+			}
+
 			case "message":
 				this.server.broadcast(message);
+				break;
+
+			default:
+				console.error(`Unknown message type ${message.type}`);
 				break;
 		}
 	}

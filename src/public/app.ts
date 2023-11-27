@@ -1,13 +1,140 @@
+interface Offer {
+	type: "offer";
+	targetUser: string;
+	sourceUser: string;
+	offer: RTCSessionDescriptionInit;
+}
+
+interface Answer {
+	type: "answer";
+	targetUser: string;
+	sourceUser: string;
+	answer: RTCSessionDescriptionInit;
+}
+
+interface Candidate {
+	type: "candidate";
+	targetUser: string;
+	sourceUser: string;
+	candidate: RTCIceCandidateInit;
+}
+
 class Application {
 	private keys: Record<string, boolean> = {};
-
 	private ws: WebSocket;
+	private micStream: MediaStream;
+	private myId: string;
+
+	private connections: Record<string, RTCPeerConnection> = {};
 
 	public async init() {
 		// this.addEventListeners();
 		this.onResize();
-		this.connectWs();
+		await this.getMicStream();
 
+		this.connectWs();
+		this.setupMessageBox();
+		this.run();
+	}
+
+	private async getMicStream() {
+		this.micStream = await navigator.mediaDevices.getUserMedia({ video: false, audio: true });
+	}
+
+	private createNewRTCConnection(userId: string) {
+		const configuration = {
+			iceServers: [{ urls: ["stun:stun2.1.google.com:19302"] }]
+		};
+		const connection = new RTCPeerConnection(configuration);
+		this.micStream.getTracks().forEach(track => console.log(track));
+		this.micStream.getTracks().forEach(track => connection.addTrack(track, this.micStream));
+
+		const parent = document.getElementById("sidebar");
+		const audio = document.createElement("audio");
+		audio.autoplay = true;
+		audio.controls = true;
+
+		connection.addEventListener("track", e => {
+			console.log(`Received track from ${userId}`);
+			audio.srcObject = e.streams[0];
+		});
+		connection.addEventListener("icecandidate", e => {
+			if (e.candidate) {
+				console.log(`Got ICE candidate event for ${userId}`);
+				const candidateMessage: Candidate = {
+					type: "candidate",
+					targetUser: userId,
+					sourceUser: this.myId,
+					candidate: e.candidate
+				};
+
+				this.send(candidateMessage);
+			}
+		});
+
+		parent.appendChild(audio);
+
+		setInterval(async () => {
+			const s = await connection.getStats();
+			s.forEach(stat => {
+				if (stat.type != "outbound-rtp" || stat.isRemote) return;
+				console.log(`Bytes sent: ${stat.bytesSent}`);
+			});
+		}, 1000);
+
+		this.connections[userId] = connection;
+
+		return connection;
+	}
+
+	private async setupNewUser(userId: string) {
+		console.log(`Setting up connection to ${userId}`);
+
+		const connection = this.createNewRTCConnection(userId);
+		const offer = await connection.createOffer();
+		await connection.setLocalDescription(offer);
+
+		const offerMessage: Offer = {
+			type: "offer",
+			targetUser: userId,
+			sourceUser: this.myId,
+			offer: offer
+		};
+
+		this.send(offerMessage);
+	}
+
+	private async handleOffer(message: Offer) {
+		console.log(`Received offer from ${message.sourceUser}`);
+		const connection = this.createNewRTCConnection(message.sourceUser);
+		await connection.setRemoteDescription(new RTCSessionDescription(message.offer));
+
+		const answer = await connection.createAnswer();
+		await connection.setLocalDescription(answer);
+
+		const answerMessage: Answer = {
+			type: "answer",
+			targetUser: message.sourceUser,
+			sourceUser: this.myId,
+			answer: answer
+		};
+
+		this.send(answerMessage);
+	}
+
+	private async handleAnswer(message: Answer) {
+		console.log(`Received answer from ${message.sourceUser}`);
+		const connection = this.connections[message.sourceUser];
+		await connection.setRemoteDescription(new RTCSessionDescription(message.answer));
+	}
+
+	private async handleCandidate(message: Candidate) {
+		console.log(`Received candidate from ${message.sourceUser}`);
+		const connection = this.connections[message.sourceUser];
+		await connection.addIceCandidate(new RTCIceCandidate(message.candidate));
+	}
+
+	private setupMessageBox() {
 		const messageBox = document.getElementById("message-box") as HTMLInputElement;
 		messageBox.onkeyup = e => {
 			if (e.key == "Enter") {
@@ -22,12 +149,11 @@ class Application {
 				messageBox.value = "";
 			}
 		};
-
-		this.run();
 	}
 
 	private connectWs() {
-		this.ws = new WebSocket("wss://" + window.location.host);
+		const proto = location.protocol.includes("s") ? "wss://" : "ws://";
+		this.ws = new WebSocket(proto + window.location.host);
 		this.ws.onopen = () => {
 			console.log("Connected to server");
 		};
@@ -41,8 +167,6 @@ class Application {
 		};
 
 		this.ws.onmessage = (message: MessageEvent) => {
-			console.log(message.data);
-
 			try {
 				const data = JSON.parse(message.data);
 				this.handleMessage(data);
@@ -65,6 +189,27 @@ class Application {
 	private handleMessage(message: any) {
 		switch (message.type) {
 			case "ping":
+				this.send({ type: "pong" });
+				break;
+
+			case "conn":
+				this.myId = message.userId;
+				break;
+
+			case "new_conn":
+				this.setupNewUser(message.userId);
+				break;
+
+			case "offer":
+				this.handleOffer(message);
+				break;
+
+			case "answer":
+				this.handleAnswer(message);
+				break;
+
+			case "candidate":
+				this.handleCandidate(message);
 				break;
 
 			case "message":
