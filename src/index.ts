@@ -29,6 +29,8 @@ class ServerApplication {
 			this.broadcast({ type: "new_conn", userId: client.id });
 			this.clients.push(client);
 		});
+
+		this.tick();
 	}
 
 	private tick() {
