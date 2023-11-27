@@ -19,7 +19,7 @@ class ServerApplication {
 		app.use(bodyParser.json());
 
 		const httpServer = app.listen(parseInt(process.env.PORT), () => {
-			console.log("Server started on port 8000");
+			console.log(`Server started on port ${process.env.PORT}`);
 		});
 
 		const wsServer = new WebSocketServer({ server: httpServer });
